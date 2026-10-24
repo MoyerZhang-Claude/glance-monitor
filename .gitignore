@@ -1,0 +1,13 @@
+# Runtime files; source archives are retained until extracted
+/Glance.exe
+/Glance.json
+*.log
+.env
+.env.*
+!.env.example
+.claude/
+/source/*.zip
+*.syso
+/source-code/Glance.json
+/source-code/Glance.exe
+/source-code/bin/

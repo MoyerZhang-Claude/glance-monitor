@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Glance 设置</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <img src="icon.svg" alt="" width="26" height="26">
+      <span class="brand-name">Glance</span>
+      <span class="brand-sub">硬件监控悬浮窗</span>
+    </div>
+    <div class="status" id="status" aria-live="polite"></div>
+  </header>
+
+  <nav class="nav" id="nav" aria-label="设置分类"></nav>
+
+  <main class="main" id="main">
+    <div class="loading" id="loading">正在连接 Glance…</div>
+  </main>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>
