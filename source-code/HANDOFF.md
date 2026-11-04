@@ -4,7 +4,19 @@
 用户的诉求：一个**简洁、不影响游戏帧率、可自由摆放**的专属监控悬浮窗，在游戏、桌面和托盘里都能看数据。
 用户在线，会帮你测试（发截图、重启程序），可以直接请他操作。界面和沟通都用中文。
 
-## 0. b10（2026-10-19，Claude 收尾优化）
+## 0. b11–b12（2026-11-04，OpenGL/Vulkan 全屏游戏看不到悬浮窗；b12 加 Sodium 兼容）
+- 现象：用 PCL 社区版启动《我的世界》1.21.11（Fabric，`options.txt` 里 `fullscreen:true`）时悬浮窗不显示，DeepSeek Harness 的桌宠也不显示。
+- 已核实的原因：游戏运行时查过窗口层级，Glance 悬浮窗（TOPMOST）排在 `javaw.exe` 的 GLFW 全屏窗口**之上**，但仍不可见；同时 Glance 的 ETW 完全收不到 javaw 的 present 事件（GPU 77%，`fps=false`）。NVIDIA OpenGL 驱动全屏时默认直接输出到屏幕，绕过 DWM，任何置顶窗口都画不上去。不是 Z 序问题，Glance 本身已每秒重置 TOPMOST。
+- 修法：NVIDIA 驱动配置 “Vulkan/OpenGL present method”（ID `0x20D690F8`，0=首选本机，1=DXGI 交换链分层，2=自动/默认）设为 1。已用驱动接口核对过 ID、名称和取值。
+- 实现：`internal/nvdrs`（NVAPI DRS：找程序 → 没有就建 “Glance - <exe>” 配置文件 → 写设置 → 保存；关闭时删除自建配置文件，或只删该设置）。`internal/ui/glcompat.go` 记录最近全屏的前台程序及其帧来源，设置页 → 悬浮窗 →“全屏游戏里看不到悬浮窗？”列出非 DirectX 的全屏程序 + javaw.exe + 之前改过的程序，每个一个开关。修改后需重启游戏。
+- 测试：`TestApplyUnsaved` / `TestAliasesUnsaved` 对真实驱动走完整的“建配置 → 写 → 读回 → 删”，但不调用 SaveSettings，驱动设置不会被改动。实测 SaveSettings 不需要管理员权限。
+- **第一版没生效（已修）**：只给 `javaw.exe` 设置后，游戏进程仍只加载 `opengl32.dll` + `nvoglv64.dll`，没有 dxgi。原因是用户装了 Sodium：它在驱动初始化期间把进程命令行改成 `net.caffeinemc.sodium / net.minecraft.client.main.Main /`（见其 `NvidiaWorkarounds` / `WindowsCommandLine`），驱动按命令行识别 Java 程序，于是改用 NVIDIA 自带的 “Minecraft” 配置（其中有 app `net.minecraft.client.main.main`），不再匹配 `javaw.exe`。
+  - 验证方法：自写最小 OpenGL 程序（命名为 javaw.exe，可选覆盖命令行），看进程是否加载 `dxgi.dll`/`d3d11.dll`。结果：不匹配配置 → 无 dxgi；javaw.exe + Glance 配置 → 有；javaw.exe + Sodium 命令行 → 无；再给 “Minecraft” 配置设 1 → 有（窗口和全屏都有）。给 Glance 配置加 `net.caffeinemc.sodium` 无效（已删除）。
+  - 现做法：`nvdrs.Aliases` 让 javaw.exe 同时设置 `net.minecraft.client.main.main` 所在的配置文件（NVIDIA 的 Minecraft 配置只改这一项，关闭时删除该项恢复默认；驱动不认识的别名放进 Glance 自己的配置）。只有所有别名都是 DXGI 时开关才显示为开。
+- **待用户验收**：重启《我的世界》，确认悬浮窗显示、帧率出现（预期来源变为 DXGI）。驱动设置已经用 `nvdrs.Set("javaw.exe", true)` 写好（与设置页开关同一代码）。
+- 注意：`build.ps1` 是无 BOM 的 UTF-8，Windows PowerShell 5.1 解析会出错（中文被当成 GBK）；本轮直接用 bash 跑了同样的 test / vet / build 命令。
+
+## 0.1 b10（2026-10-19，Claude 收尾优化）
 - GPU 功耗自动恢复：启动时探测失败（方法为 none）后，每 60 秒安静地重试 NVML PowerUsage / 字段 186、185 / 能耗计数器；成功后日志记 `GPU power recovered: method X`，不用重启 Glance。
 - CPU 频率防尖峰：PDH “% Processor Performance” 采样窗口短于 0.45 秒时（启动、设置变更触发的提前采样），沿用上一个有效值。b9 日志里启动第二个样本出现过 5874MHz。
 - 周期日志里新增 `self: private / goHeap / goSys`，可以区分 Go 堆和原生库（GDI+、NVML、PDH）的内存占用。设置页自报私有内存约 74MiB，还没分析具体构成。

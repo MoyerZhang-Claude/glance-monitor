@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,7 @@ type fake struct {
 	cfg     *config.Config
 	editing bool
 	auto    bool
+	glOn    bool
 	t0      time.Time
 	game    bool
 	asleep  bool
@@ -99,6 +101,17 @@ func (f *fake) Action(name, arg string) (any, error) {
 		return f.cfg.Clone(), nil
 	case "diagnostics":
 		return "demo diagnostics", nil
+	case "gl_compat":
+		if strings.HasPrefix(arg, "on:") || strings.HasPrefix(arg, "off:") {
+			f.glOn = strings.HasPrefix(arg, "on:")
+		}
+		v := 2
+		if f.glOn {
+			v = 1
+		}
+		return map[string]any{"available": true, "error": "", "apps": []map[string]any{
+			{"exe": "javaw.exe", "value": v, "ours": f.glOn, "api": "", "seen": true, "running": true},
+		}}, nil
 	}
 	return map[string]bool{"ok": true}, nil
 }

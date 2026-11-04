@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	Version   = "1.0.0-b10"
+	Version   = "1.0.0-b12"
 	MainClass = "GlanceHUD.Main"
 
 	wmSnapshot     = w32.WM_APP + 2
@@ -73,6 +73,9 @@ type App struct {
 	taskbarCreated uint32
 	fgHook         w32.HANDLE
 	lastFullscreen bool
+	fullPID        uint32       // foreground fullscreen process last looked up
+	fullExe        string       // its exe name
+	recentFull     []recentFull // fullscreen programs, most recent first (glcompat.go)
 	lastOpts       sensors.Options
 	autostart      atomic.Bool
 	pendingSnap    atomic.Bool
@@ -287,6 +290,7 @@ func (a *App) onSnapshot() {
 
 func (a *App) render() {
 	snap := a.mgr.Latest()
+	a.noteFullscreen(snap)
 	a.overlay.update(a.cfg, snap, a.overlayVisible())
 	a.tray.update(a.cfg, snap, a.light)
 	if a.card.shown {
@@ -728,6 +732,8 @@ func (a *App) Action(name, arg string) (any, error) {
 		err = a.applyUpdate()
 	case "diagnostics":
 		res = a.diagnostics()
+	case "gl_compat":
+		res, err = a.glCompat(arg)
 	default:
 		err = errors.New("unknown action")
 	}

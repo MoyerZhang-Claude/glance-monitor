@@ -567,7 +567,76 @@ function buildOverlay() {
     h("div", { class: "rows", style: { marginTop: "18px" } },
       row("没有游戏时隐藏帧率行", "回到桌面或游戏暂停渲染时，帧率这一行会自动收起。", toggle("overlay.hideIdleFps")),
       row("录屏 / 截图时隐藏", "开启后悬浮窗不会出现在 OBS、NVIDIA 录制和截图中（需要 Windows 10 2004 以上）。", toggle("overlay.hideCapture")),
-    ));
+    ),
+    ...buildGLCompat());
+}
+
+/* OpenGL / Vulkan fullscreen games on NVIDIA (internal/ui/glcompat.go) */
+const GL_NAMES = { "javaw.exe": "《我的世界》Java 版", "java.exe": "《我的世界》Java 版" };
+
+function buildGLCompat() {
+  const list = h("div", { class: "rows" });
+  const note = h("p", { class: "hint" });
+  let busy = false, loading = false;
+
+  const describe = (app) => {
+    const parts = [];
+    if (app.value === 1) parts.push("已开启：全屏时悬浮窗可以正常显示");
+    else if (app.value === 0) parts.push("当前：驱动设为“直接输出到屏幕”，全屏时悬浮窗会被挡住");
+    else parts.push("当前：驱动默认设置，全屏时悬浮窗会被挡住");
+    if (app.seen && app.value !== 1) parts.push(app.api === "Vulkan/GL" ? "刚才检测到它以 OpenGL / Vulkan 全屏运行" : "刚才全屏运行时，Glance 没有检测到它的画面输出");
+    if (app.running) parts.push("正在运行，修改后要重启它才生效");
+    if (app.exe === "javaw.exe") parts.push("开关同时会修改 NVIDIA 驱动自带的“Minecraft”配置（装了 Sodium 模组时驱动用的是那一份）");
+    return parts.join("；") + "。";
+  };
+
+  const paint = (r) => {
+    list.textContent = "";
+    if (!r || !r.available) {
+      note.textContent = (r && r.error ? r.error + "。" : "") + "这个功能只适用于 NVIDIA 显卡。";
+      return;
+    }
+    note.textContent = "";
+    for (const app of r.apps) {
+      const input = h("input", { type: "checkbox", role: "switch", "aria-label": app.exe });
+      input.checked = app.value === 1;
+      input.addEventListener("change", async () => {
+        if (busy) { input.checked = !input.checked; return; }
+        busy = true; input.disabled = true;
+        const on = input.checked;
+        try {
+          paint(await action("gl_compat", (on ? "on:" : "off:") + app.exe));
+          toast(on ? (app.running ? "已开启，请重启游戏" : "已开启，下次启动游戏时生效") : "已恢复为驱动默认设置");
+        } catch (e) {
+          input.checked = !on;
+        } finally {
+          busy = false; input.disabled = false;
+        }
+      });
+      const title = GL_NAMES[app.exe] ? `${GL_NAMES[app.exe]}（${app.exe}）` : app.exe;
+      list.append(row(title, describe(app), h("label", { class: "switch" }, input, h("span"))));
+    }
+  };
+
+  const load = async () => {
+    if (loading || busy) return;
+    loading = true;
+    try { paint(await api("/api/action", { action: "gl_compat", arg: "" })); }
+    catch (e) { note.textContent = "读取 NVIDIA 驱动设置失败：" + e.message; }
+    finally { loading = false; }
+  };
+  load();
+  // Coming back from a game (alt-tab) refreshes the list of detected programs.
+  window.addEventListener("focus", load);
+  window.addEventListener("hashchange", () => { if ((location.hash.slice(1) || "overlay") === "overlay") load(); });
+
+  return [
+    h("h2", null, "全屏游戏里看不到悬浮窗？"),
+    h("p", { class: "hint" }, "NVIDIA 显卡运行《我的世界》等 OpenGL / Vulkan 游戏并全屏时，画面会直接输出到屏幕，不经过 Windows 的桌面合成，悬浮窗、桌宠等所有置顶窗口都会被挡住。" +
+      "对这些游戏打开下面的开关即可：Glance 会把 NVIDIA 驱动里这个程序的“Vulkan/OpenGL 呈现方法”改为“通过 DXGI 交换链呈现”。只影响该程序，随时可以关闭恢复，修改后需要重启游戏。DirectX 游戏不受影响，不会列在这里。"),
+    list,
+    note,
+  ];
 }
 
 function updateGhost(hud) {
