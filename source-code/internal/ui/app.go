@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	Version   = "1.0.0-b12"
+	Version   = "1.0.0-b13"
 	MainClass = "GlanceHUD.Main"
 
 	wmSnapshot     = w32.WM_APP + 2

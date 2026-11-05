@@ -4,7 +4,13 @@
 用户的诉求：一个**简洁、不影响游戏帧率、可自由摆放**的专属监控悬浮窗，在游戏、桌面和托盘里都能看数据。
 用户在线，会帮你测试（发截图、重启程序），可以直接请他操作。界面和沟通都用中文。
 
-## 0. b11–b12（2026-11-04，OpenGL/Vulkan 全屏游戏看不到悬浮窗；b12 加 Sodium 兼容）
+## 0. b13（2026-11-05，《我的世界》26.3 不显示帧率）
+- 26.3（Fabric + Sodium 0.9.2）改用 SDL3 无边框全屏，悬浮窗能显示，但帧率始终没有：进程只加载 dxgi.dll（SDL 枚举显示器用），没有 d3d11，即驱动没切到 DXGI 分层，走 NVIDIA OpenGL 原生输出。原因未查清（用 Fabric 真实命令行的测试程序是能切换的）。
+- 用提权的临时 ETW 工具统计 4 秒内 javaw 的 DxgKrnl 事件：每帧有 Blit(166)、Present_Info(184)、PresentHistoryDetailed_Start(215) 等，约 73 帧/秒，但**没有** PresentHistory_Start(171)，而 Glance 只订阅了 171。
+- 修法：同时订阅 215（与 171 含义相同，PresentMon 也两个都处理），Model 字段偏移按 (事件 ID, 版本) 缓存；同一进程只认第一个出现的变体，防止重复计数。
+- 未覆盖：旧版独占全屏的 OpenGL 走 legacy flip（DxgKrnl Flip 168），仍统计不到；目前靠 DXGI 呈现开关解决。
+
+## 0.1 b11–b12（2026-11-04，OpenGL/Vulkan 全屏游戏看不到悬浮窗；b12 加 Sodium 兼容）
 - 现象：用 PCL 社区版启动《我的世界》1.21.11（Fabric，`options.txt` 里 `fullscreen:true`）时悬浮窗不显示，DeepSeek Harness 的桌宠也不显示。
 - 已核实的原因：游戏运行时查过窗口层级，Glance 悬浮窗（TOPMOST）排在 `javaw.exe` 的 GLFW 全屏窗口**之上**，但仍不可见；同时 Glance 的 ETW 完全收不到 javaw 的 present 事件（GPU 77%，`fps=false`）。NVIDIA OpenGL 驱动全屏时默认直接输出到屏幕，绕过 DWM，任何置顶窗口都画不上去。不是 Z 序问题，Glance 本身已每秒重置 TOPMOST。
 - 修法：NVIDIA 驱动配置 “Vulkan/OpenGL present method”（ID `0x20D690F8`，0=首选本机，1=DXGI 交换链分层，2=自动/默认）设为 1。已用驱动接口核对过 ID、名称和取值。

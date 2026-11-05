@@ -142,6 +142,9 @@ const (
 	idDXGIPresentMPOStart = 0x37
 	idD3D9PresentStart    = 0x01
 	idDxgkPresentHistoryStart = 0xAB
+	// Same meaning as PresentHistory_Start; NVIDIA's native OpenGL path (e.g.
+	// Minecraft 26.x in borderless fullscreen) emits only this one.
+	idDxgkPresentHistoryDetailedStart = 0xD7
 
 	dxgiPresentTest = 0x1
 	presentModelRedirectedGDI = 1

@@ -42,7 +42,9 @@ type Session struct {
 	Lost    atomic.Uint32
 
 	modelMu  sync.Mutex
-	modelOff map[uint8]int // PresentHistory_Start version -> byte offset of Model (-1 unknown)
+	modelOff map[uint32]int // event id<<8 | version -> byte offset of Model (-1 unknown)
+
+	kernelID map[uint32]uint16 // pid -> PresentHistory event id it reports (ETW goroutine only)
 }
 
 var current atomic.Pointer[Session]
@@ -91,7 +93,7 @@ func StopStaleSession() { stopNamed(sessionName) }
 // Start creates the session and begins consuming events on a dedicated
 // goroutine. It requires administrator rights (or Performance Log Users).
 func Start(tr *Tracker, selfPID uint32) (*Session, error) {
-	s := &Session{tracker: tr, done: make(chan struct{}), selfPID: selfPID, modelOff: map[uint8]int{}}
+	s := &Session{tracker: tr, done: make(chan struct{}), selfPID: selfPID, modelOff: map[uint32]int{}, kernelID: map[uint32]uint16{}}
 	name, _ := syscall.UTF16PtrFromString(sessionName)
 
 	for attempt := 0; attempt < 2; attempt++ {
@@ -118,7 +120,7 @@ func Start(tr *Tracker, selfPID uint32) (*Session, error) {
 		ids []uint16
 		kw  uint64
 	}{
-		{guidDxgKrnl, []uint16{idDxgkPresentHistoryStart}, dxgkKeyword},
+		{guidDxgKrnl, []uint16{idDxgkPresentHistoryStart, idDxgkPresentHistoryDetailedStart}, dxgkKeyword},
 		{guidDXGI, []uint16{idDXGIPresentStart, idDXGIPresentMPOStart}, 0x8000000000000002},
 		{guidD3D9, []uint16{idD3D9PresentStart}, 0x8000000000000002},
 	}
@@ -236,7 +238,18 @@ func (s *Session) handle(rec *eventRecord) {
 		}
 		s.tracker.Add(Event{PID: pid, TS: h.TimeStamp, Src: SrcD3D9, Chain: readPtr(ud, ptrSize)})
 	case guidDxgKrnl:
-		if h.EventDescriptor.ID != idDxgkPresentHistoryStart {
+		id := h.EventDescriptor.ID
+		if id != idDxgkPresentHistoryStart && id != idDxgkPresentHistoryDetailedStart {
+			return
+		}
+		// Count only the first variant a process uses, in case a driver
+		// reports the same present through both.
+		if first, ok := s.kernelID[pid]; !ok {
+			if len(s.kernelID) > 4096 {
+				clear(s.kernelID)
+			}
+			s.kernelID[pid] = id
+		} else if first != id {
 			return
 		}
 		if off := s.modelOffset(rec); off >= 0 && off+4 <= n {
@@ -259,9 +272,11 @@ func readPtr(p uintptr, size int) uint64 {
 }
 
 // modelOffset finds the byte offset of the "Model" field of
-// DxgKrnl PresentHistory_Start using TDH (cached per event version).
+// DxgKrnl PresentHistory(Detailed)_Start using TDH (cached per event id
+// and version).
 func (s *Session) modelOffset(rec *eventRecord) int {
-	v := rec.EventHeader.EventDescriptor.Version
+	d := rec.EventHeader.EventDescriptor
+	v := uint32(d.ID)<<8 | uint32(d.Version)
 	s.modelMu.Lock()
 	off, ok := s.modelOff[v]
 	s.modelMu.Unlock()
